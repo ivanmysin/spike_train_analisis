@@ -22,7 +22,7 @@ def get_hmsi(spikes, hmsi_bin, file_path, title=""):
     intervals = np.diff( spikes, n=1 )
     intervals = intervals[ np.abs(intervals - np.mean(intervals)) < 3*np.std(intervals) ]
     cv = stats.variation(intervals) #  np.sqrt(np.std(intervals)) / np.mean(intervals) #
-    numBins = 100    
+    numBins = 100   
     
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -34,7 +34,7 @@ def get_hmsi(spikes, hmsi_bin, file_path, title=""):
     
     
     fig.savefig(file_path, dpi=500)
-    plt.show(fig)
+    plt.show(block=False)
     plt.close(fig)
     
     #hmsi, bins = np.histogram(intervals, numBins, density=True)
