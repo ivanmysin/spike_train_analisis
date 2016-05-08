@@ -1,4 +1,11 @@
 # -*- coding: utf-8 -*-
+
+a = ["a", "a", "d", "a", "b", "c"]
+b = sorted(set(a))
+
+print (b[1])
+
+"""
 import numpy as np
 
 x = np.random.rand(10)
@@ -14,3 +21,5 @@ for idx in range(x.size):
 
 print (x_fft.real)
 print (x_dft)
+
+"""

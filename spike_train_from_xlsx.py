@@ -5,6 +5,54 @@ import pyexcel.ext.xlsx
 import numpy as np
 import spike_train_lib as stl
 import matplotlib.pyplot as plt
+###########################################################
+def save_as_xlsx(whole_stat_arr):
+    n_rows = len(whole_stat_arr)
+    labels = []
+    for idx, row in enumerate(whole_stat_arr):
+        for key in row["stat"].keys():
+            labels.append(key)
+    
+    uniq_params = list(row["stat"][key].keys()) 
+    
+    labels = sorted (set(labels))
+    
+    n_effects = len(uniq_params)
+
+    n_cols = len(labels)*n_effects
+    
+    #формируем заколовки таблицы
+    # массив эффектов
+    effects = []
+    for _ in range(n_effects):
+        for lab in labels:
+            effects.append(lab)
+    effects = sorted(effects)
+    # массив параметров обработки
+    params = []
+    for _ in range(len(labels)):
+        for p in uniq_params:
+            params.append(p)
+    
+
+        
+    final_array = [[""], ["File name"]]
+    for eff in effects:
+        final_array[0].append(eff)
+    for p in params:
+        final_array[1].append(p) 
+
+    for row_idx in range(n_rows):
+        final_array.append([whole_stat_arr[row_idx]["File name"]])
+        for col_idx in range(n_cols):
+            param_key = params[col_idx]
+            effect_key = effects[col_idx]
+            if (effect_key in whole_stat_arr[row_idx]["stat"].keys()):
+                value = whole_stat_arr[row_idx]["stat"][effect_key][param_key]
+            else:
+                value = "-"
+            final_array[-1].append(value)
+    return final_array
 
 ###########################################################
 # processing config
@@ -22,9 +70,9 @@ statistics_path = main_path + 'statistics/'
 if not ( os.path.isdir(statistics_path) ):
     os.mkdir(statistics_path)
     
-whole_stat_xlsx = {}
+whole_stat_arr = []
     
-for file_name in (os.listdir(events_path)):
+for file_name in sorted(os.listdir(events_path)):
     
     if (file_name[0] == "."):
         continue
@@ -40,15 +88,13 @@ for file_name in (os.listdir(events_path)):
     """
     Sheet name \t N of spikes \t mean frequency \t CV \t tau (maximums) \t mode frequency \n
     """
+    whole_stat_arr.append({"File name":file_name, "stat":{} })
     
     file_path = events_path + file_name
     book = pyexcel.get_book(file_name=file_path)
-    for sheet_name in book.sheet_names():
+    for sheet_name in sorted(book.sheet_names()):
         sheet = book.sheet_by_name(sheet_name)
-        
-        if not (sheet_name in whole_stat_xlsx.keys()):
-            whole_stat_xlsx[sheet_name] = []
-        
+                   
         spikes_list = []
         if (sheet.column[0][0] == 0):
             stat_dict["Effect name"].append(sheet_name)
@@ -114,15 +160,14 @@ for file_name in (os.listdir(events_path)):
         stat_dict["tau_maxs"].append(tau_maxs)
         stat_dict["mode frequency"].append(modeFr)
         
-        stat_for_whole = {
-            "events file": file_name,
+        whole_stat_arr[-1]["stat"][sheet_name] = {
             "N of spikes": sp.size,
             "Mean frequency": meanFr,
             "CV": cv,
             "Tau by maximums": tau_maxs,
             "Mode frequency": modeFr
         }
-        whole_stat_xlsx[sheet_name].append(stat_for_whole)
+        
     
     statistics_file = open(saving_path + 'stat.txt', "w")
     statistics_file.write (statisticsByNeuron)
@@ -130,7 +175,9 @@ for file_name in (os.listdir(events_path)):
     
     stat_xlsx = pyexcel.get_sheet(adict=stat_dict)
     stat_xlsx.save_as(saving_path + "stat.xlsx")
-
-whole_stat = pyexcel.get_sheet(adict=whole_stat_xlsx)
+    
+    
+# нужно преобразовать whole_stat_xlsx в двумерный массив
+final_array = save_as_xlsx(whole_stat_arr)
+whole_stat = pyexcel.Sheet(final_array)
 whole_stat.save_as(statistics_path + "whole_stat.xlsx")
-
