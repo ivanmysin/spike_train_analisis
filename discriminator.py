@@ -7,14 +7,18 @@ import numpy as np
 from scipy import io
 import scipy.signal as sig
 from sklearn.decomposition import PCA
+from sklearn import manifold
 from sklearn import preprocessing
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import mynet
 import mylib as lib
-from sklearn.cluster import MeanShift, estimate_bandwidth
+from sklearn.cluster import MeanShift, estimate_bandwidth, KMeans, DBSCAN, SpectralClustering
 from itertools import cycle
 from scipy import stats
+from scipy.stats import variation as cv
 from scipy import interpolate
 import autoencoder as keras_autoencoder
 import os
@@ -33,6 +37,9 @@ class Discriminator:
         
     def clear_from_stims(self, stims_series):
         for stim in stims_series.values():
+            if not(type(stim) is np.ndarray):
+                continue
+
             for st in stim:
                 starts_inds = int (st*self.fd - 0.005*self.fd) 
                 ends_inds = int (st*self.fd + 0.005*self.fd)
@@ -72,7 +79,7 @@ class Discriminator:
                
         #loc_min_ind = np.asarray (sig.argrelextrema(self.spikes_signal, np.less, order=1) )
         #loc_min_vals = spikes_signal[loc_min_ind]
-        self.threshold = 4*np.median( np.abs(self.spikes_signal[0:-1:10]) / 0.6745 )
+        self.threshold = 4 * np.median( np.abs(self.spikes_signal[0:-1:10]) / 0.6745 )
         
         self.spikes_indexes = np.append( \
                       np.argwhere(self.spikes_signal >= self.threshold), \
@@ -80,6 +87,8 @@ class Discriminator:
         self.spikes_indexes = np.sort(self.spikes_indexes)
         self.spikes_indexes = self.spikes_indexes[ np.diff( np.append(0, self.spikes_indexes) ) > (self.fd * adiaphoriaFactor) ]
         
+        self.n_clusters = 1
+        self.labels = np.zeros(self.spikes_indexes.size)
                 
         return self
 
@@ -97,6 +106,7 @@ class Discriminator:
         datasetOfSpikes = np.empty((self.spikes_indexes.size, self.window_size*resamplingFactor), dtype=float)
         
         for idx, sp_idx in enumerate(self.spikes_indexes):
+            
         
             max_idx = np.argmax(self.spikes_signal[sp_idx-self.window_size:sp_idx+self.window_size] ) - self.window_size 
             l_ind = int(sp_idx - self.winstart + max_idx)
@@ -114,7 +124,9 @@ class Discriminator:
                 examp = f(ts)
             
             datasetOfSpikes[idx, :] = examp
-            #datasetOfSpikes = np.append(datasetOfSpikes, examp.reshape(1, self.window_size*resamplingFactor), axis=0)
+        
+        datasetOfSpikes = datasetOfSpikes**3
+        #preprocessing.normalize(datasetOfSpikes, copy=False)
         
         self.spikes = self.spikes_indexes / self.fd
         if (datasetOfSpikes.shape[0] < 5):
@@ -126,18 +138,46 @@ class Discriminator:
         io.savemat(datasets_matfile, {"dataset":datasetOfSpikes, 
                 "compressed_dataset":compress_data, "spikes_times":self.spikes})
         
-        pca = PCA(n_components=3)
-        self.spikes_compressed = pca.fit(compress_data).transform(compress_data)
+
+        compressor = PCA(n_components = 3)
+        # manifold.Isomap(n_neighbors=30, n_components=3) 
+        # 
+        # 
+        # manifold.TSNE(n_components=3, init='pca', random_state=0)
+ 
+        self.spikes_compressed = compressor.fit_transform(compress_data)
+        #np.empty((compress_data.shape[0], 3), dtype=float)
+#        
+#        min_idx = 0
+#        max_idx = 5000
+#        while(min_idx < compress_data.shape[0]):
+#            compressed_slice = compress_data[min_idx:max_idx, :]
+#            print (compressed_slice.shape)
+#            self.spikes_compressed[min_idx:max_idx, :] = compressor.fit_transform(compressed_slice)
+#            min_idx += 5000
+#            max_idx += 5000
+
         return self
 
-    def clusterize_spikes(self):
-        bandwidth = estimate_bandwidth(self.spikes_compressed)
+    def clusterize_spikes(self, n_clusters = None):
+        
+        if (n_clusters):
+            clusterizator = KMeans(n_clusters=n_clusters)  
+        else:
+            bandwidth = estimate_bandwidth(self.spikes_compressed, quantile=0.8)
+            clusterizator = MeanShift(bandwidth=bandwidth, bin_seeding=True, cluster_all=False) 
+        #lib.XMeans() 
 
-        m_shift = MeanShift(bandwidth=bandwidth, bin_seeding=False, n_jobs=-1)
-        m_shift.fit(self.spikes_compressed)
-        self.labels = m_shift.labels_
+        # SpectralClustering(n_clusters=2)
+#        DBSCAN(eps=0.05, min_samples=1000, \
+#                              metric='euclidean', algorithm='auto', \
+#                              leaf_size=70, p=None, random_state=None)
+        
+        
+        clusterizator.fit(self.spikes_compressed)
+        self.labels = clusterizator.labels_
         #cluster_centers = m_shift.cluster_centers_
-        self.n_clusters = m_shift.cluster_centers_.shape[0]
+        self.n_clusters = len(np.unique(self.labels))
    
         return self
 
@@ -200,6 +240,7 @@ class Discriminator:
 
 
     def plot_results(self, plotTitle, spikeFormsFiles, pathSignals, pca_plot, step_of_signal=10, start_window_of_signal=0, end_window_of_signal=5, max_time=-1):
+        import matplotlib.pyplot as plt        
         if (max_time == -1):
             max_time = self.origin_signal.size/self.fd
         times_samles = np.linspace(0, self.spikes_signal.size/self.fd, self.spikes_signal.size )
@@ -216,16 +257,19 @@ class Discriminator:
         ax = fig.add_subplot(111, projection='3d')
         colors = cycle(["b", "g", "m", "c", "k", "y", "r"])
     
-        for idx in range (self.n_clusters):
+        for idx in range(self.n_clusters):
             sp = self.spikes_indexes[self.labels==idx]
-            xs = self.spikes_compressed[self.labels==idx, 0]
-            ys = self.spikes_compressed[self.labels==idx, 1]
-            zs = self.spikes_compressed[self.labels==idx, 2]
             cluster_color = next(colors)
-            ax.scatter(xs, ys, zs, s=50, c=cluster_color)
+            if hasattr(self, 'spikes_compressed'):
+                xs = self.spikes_compressed[self.labels==idx, 0]
+                ys = self.spikes_compressed[self.labels==idx, 1]
+                zs = self.spikes_compressed[self.labels==idx, 2]
+                ax.scatter(xs, ys, zs, s=50, c=cluster_color)
+                #ax.scatter(xs, ys, s=10, c=cluster_color)
+                
 
-            signal_ax.scatter(times_samles[sp], 0.8*np.ones(sp.size),\
-                                      c=cluster_color, s=100, marker="o")
+            signal_ax.scatter(times_samles[sp], 0.7*np.ones(sp.size)+(idx*0.05),\
+                                      c=cluster_color, s=50, marker="o")
 
             fig_of_spikes = plt.figure()
             ax_of_spikes = fig_of_spikes.add_subplot(111)
@@ -268,99 +312,92 @@ class Discriminator:
             plt.close("all") #signal_fig, fig, fig_of_spikes
             
             return self
+    
+    def delete_spike_by_index(self, indexes):
+        self.spikes_indexes = self.spikes_indexes[indexes]
+        self.labels = self.labels[indexes]
+        #self.spikes_compressed = self.spikes_compressed[:, indexes]
+                
 ###############################################################################
-def descriminate_stimulations(spikes_signals, fd, minimal_interval = 0.05, ratio_coef = 5):
+def descriminate_stimulations(signal, fd, min_interstim_interval=0.25, threshold = 0.5):
+    
+    
+    signal =  2 * ( signal - signal.min() ) / (signal.max() - signal.min()) - 1
+    stims_find = np.ones(signal.shape[0], dtype=float)
 
-    stims_find = np.ones(spikes_signals.shape[0], dtype=float)
-    stims_series = {}
-    for ch_ind in range(spikes_signals.shape[1]):
-        original_spikes_signal = spikes_signals[:, ch_ind]
-        spikes_signal = 2*( original_spikes_signal - original_spikes_signal.min() ) / (original_spikes_signal.max() - original_spikes_signal.min() ) - 1
-     
-        spikes_signal = lib.butter_bandpass_filter(spikes_signal, 500, fd/2-100, fd)
-     
-        threshold = 3*np.median( np.abs(spikes_signal) / 0.6745 )
-        spikes_signal[(spikes_signal>-threshold)&(spikes_signal<threshold)] = 0
-        stims_find *= spikes_signal
+    for ch_ind in range(signal.shape[1]):
+        channel_signal = signal[:, ch_ind]
+        
+        stims_find *= np.abs(channel_signal)
         
     if (np.sum(stims_find) < 5):
-        return False
-
-    stims = np.argwhere(stims_find > 0) 
-    #lib.get_argextremums(stims_find)
-    #np.asarray ( sig.argrelextrema(stims_find, np.greater, order=1) )
-    stims = (stims/fd).astype(float)
-    stims_diff = stims[1:] - stims[:-1]
+        return []
     
-    stims_diff = np.append(stims_diff, stims_diff.max() )
-    stims = stims[ stims_diff>minimal_interval ]
-    stims_diff = stims[1:] - stims[:-1]
+    t = np.linspace(0, signal.shape[0]/fd, signal.shape[0])
+    signal = np.abs(signal[:, 0]) * np.abs(signal[:, 1])
+    stims = t[signal >= threshold]
+        
+    stims = stims[np.append([min_interstim_interval], np.diff(stims)) >= min_interstim_interval ]
     
-    stims_diff = 0.1 *( np.round(stims_diff*10) )
-    mode_diff = stats.mode(stims_diff)
+    if (stims.size < 3):
+        return []
     
+    stimulations = {}
+    stims_intervals = np.diff(stims)
     
-    
-
-    counter = 0
-    for idx, mode in enumerate(mode_diff[0]):
-        start_ind = -1
-        end_ind =-1
-        for ind in range(stims.size):
-
-            if (ind == 0 and (stims[ind+1] - stims[ind]) < ratio_coef*mode ):
-                start_ind = ind
-                continue
+    start_ind = 0
+    end_ind = -1
+    previous_interval = 2*stims_intervals[0]
+    counter = 1
+    for idx, st_int in enumerate(stims_intervals):
+        if ( np.abs(st_int - previous_interval) / st_int  > 0.3 or  (idx == stims_intervals.size - 1)):
+            if ( idx < stims_intervals.size - 1 ):
+                end_ind = idx
+            else:
+                end_ind = idx + 1
             
-            if ( ind == stims.size-1 and (stims[ind] - stims[ind-1]) < ratio_coef*mode):
-                end_ind = ind
-                if (start_ind != -1):
-                    st = stims[start_ind:end_ind]
-                    if ( st.size>3 and stats.variation(np.diff(st)) < 0.2): 
-                        stims_series[str(counter)] = st
-                        counter +=1
-                start_ind = -1
-                continue
-            if ( ind == stims.size-1): continue
+            if ( (end_ind - start_ind) > 3 and cv(stims_intervals[start_ind:end_ind] < 0.4) ):
+                st = stims[start_ind:end_ind+1]
+                stimulations[str(counter)] = st
+                counter += 1
+                #print (len(stimulations), st[0], st[-1], np.mean(stims_intervals[start_ind:end_ind]))
             
-            if ( (stims[ind] - stims[ind-1]) > ratio_coef*mode and (stims[ind+1] - stims[ind]) < ratio_coef*mode ):
-                start_ind = ind
-                continue
-            
-            if ( (stims[ind] - stims[ind-1]) < ratio_coef*mode and (stims[ind+1] - stims[ind]) > ratio_coef*mode ):
-                end_ind = ind
-                if (start_ind != -1):
-                    st = stims[start_ind:end_ind]
-                    if ( st.size>3 and stats.variation(np.diff(st)) < 0.2):
-                        stims_series[str(counter)] = st
-                        counter +=1
-                start_ind = -1
-                continue
-    
-    return stims_series
+            start_ind = idx + 1
+        previous_interval = st_int
+    return stimulations
 
            
 ###############################################################################
 def autodescriminate(origin_spikes_signal, fd, stimulations, weightsFile, dataDescr, 
                      spikeFormsFiles, pca_plot, datasets_matfile,
                      window_size=3, winstart=1, saveWeights=True,
-                     loadWeights=True, pathForSignal=False, resamplingFactor=6, adiaphoriaFactor=0.003 ):
+                     loadWeights=True, pathForSignal=False, 
+                     resamplingFactor=6, adiaphoriaFactor=0.003, n_clusters = 0):
                          
     discrim = Discriminator(origin_spikes_signal, fd, window_size, winstart)
     if ( stimulations ):
         discrim.clear_from_stims(stimulations)
     discrim.find_spikes_indexes_over_theshold()
     
+    spikes = discrim.get_spikes()["1"]
+    needed_spikes = np.zeros_like(spikes, dtype=bool)
+    for idx, st in stimulations.items():
+        min_t = st[0] - 180
+        max_t = st[-1] + 180
+        needed_spikes = np.logical_or(needed_spikes, (spikes >= min_t) & (spikes <= max_t) )
     
-    res = discrim.compress_spikes_form(weightsFile, datasets_matfile, loadWeights=True, saveWeights=True, resamplingFactor=resamplingFactor, lr=0.1)
-    if (type(res) is bool):
-        return False
-    discrim.clusterize_spikes()
-    #discrim.clear_outliers()
-    #discrim.clusterize_spikes()
+    discrim.delete_spike_by_index(needed_spikes)   
+
+    if ( n_clusters > 1):
+        res = discrim.compress_spikes_form(weightsFile, datasets_matfile, loadWeights=True, saveWeights=True, resamplingFactor=resamplingFactor, lr=0.1)
+        if (type(res) is bool):
+            return False
+        discrim.clusterize_spikes(n_clusters)
+        #discrim.clear_outliers()
+        #discrim.clusterize_spikes()
     discrim.plot_results(dataDescr, spikeFormsFiles, pathForSignal, pca_plot, \
-                         step_of_signal=10, start_window_of_signal=0, \
-                         end_window_of_signal=5, max_time=-1)
+                         step_of_signal=4, start_window_of_signal=0, \
+                         end_window_of_signal=3, max_time=-1)
     spikes = discrim.get_spikes()
 
     return spikes
@@ -370,18 +407,15 @@ def autodescriminate(origin_spikes_signal, fd, stimulations, weightsFile, dataDe
 if __name__ == "__main__":
     from scipy.io.wavfile import read
     main_path = '/home/ivan/Data/Ach_full/'
-    #'/home/ivan/Data/speed_of_streem/test_7_layers/!Без пикротоксина/'
-    # '/home/ivan/Data/Ach_full/'
-    #'/home/ivan/Data/speed_of_streem/!Без пикротоксина/'
-    #'/home/ivan/Data/test_of_spike_sorting/!Без пикротоксина/'
-    #'/home/ivan/Data/speed_of_streem/Свинки/2_Цельные записи после очистки/'
+    
+    descr_stims_path = main_path + 'discrimination_simulation/'
 
     
-    dataDir = main_path + "source_data/"
+    dataDir = main_path + "source_data_simulations/"
     if not ( os.path.isdir(dataDir) ):
         raise SystemExit('Can not find source data directory!')
         
-    processing_dir = main_path + 'processing/'
+    processing_dir = main_path + 'processing_stimulations/'
     if not ( os.path.isdir(processing_dir) ):
         os.mkdir(processing_dir)
         
@@ -396,8 +430,6 @@ if __name__ == "__main__":
     if not ( os.path.isdir(stimulationDir) ):
         os.mkdir(stimulationDir)    
     
-     
-    
     spikeFormsPath = processing_dir + "spikes_forms/"
     if not ( os.path.isdir(spikeFormsPath) ):
         os.mkdir(spikeFormsPath)
@@ -407,53 +439,64 @@ if __name__ == "__main__":
         os.mkdir(pathSignals)
     
     
-    pca_plots = processing_dir + "pca_plots/"
-    if not ( os.path.isdir(pca_plots) ):
-        os.mkdir(pca_plots)
     
     
     ######################################
     loadWeights = True
-    saveWeights = True
-    weightsFile = main_path + "weights/conv_weigths.hdf5" # None
-
-    for dataFile in os.listdir(dataDir):
-
+    saveWeights = False
+    weightsFile = main_path + "weights/conv_weigths_difficult**3.hdf5" # None
+    
+    
+    for dataFile in sorted( os.listdir(dataDir) ):
+        #dataFile = dataFile2["file"]
         if (os.path.splitext(dataFile)[1] != '.wav'): continue
             
         #if not("02-17-2016_1_CL_пикротоксин_стимуляция_скорость.wav" in dataFile):
         #    continue
-            
         print (dataFile)
-
-
+        
         data = read(dataDir + dataFile) # io.loadmat(dataDir + dataFile)
         fd = float(data[0])
         resamplingFactor = 1 #16000.0/fd
         ######################################
 
         spikes_signals = data[1].astype(dtype=float)
+        if (len(spikes_signals.shape) == 1):
+            spikes_signals = spikes_signals.reshape(spikes_signals.size, 1)
         #spikes_signals = spikes_signals[120000:840000, :] # !!!!!!!!!
         
         
-        # !!!!!!!!!!!!!!!!!!!!!!!!!!
-        stimulations = False # descriminate_stimulations(spikes_signals, fd)
+        stims_file = descr_stims_path + os.path.splitext(dataFile)[0] + '_stims_descr.mat'
+                
+        if (os.path.isfile(stims_file)):
+            stimulations = io.loadmat(stims_file)
+            keys = list (stimulations.keys())
+            for key in keys:
+                stims = stimulations[key]
+                if (type(stims) is np.ndarray):
+                    stimulations[key] = stims.reshape(stims.size)
+                else:
+                    stimulations.pop(key)
+        else:
+            print ("Файл со стимуляциями не обнаружили и дискриминируем стимуляции")
+            stimulations = descriminate_stimulations(spikes_signals, fd)
+        
+        
         for ch_ind in range(spikes_signals.shape[1]):
+            #ch_ind = int(ch_ind-1)
             dataFile = os.path.splitext(dataFile)[0]
             resultFile = discriminated_spikes_dir  + dataFile + '_discr_channel_'  + str(ch_ind+1)
             
-            print (resultFile)
-            if ( os.path.isfile(resultFile + ".mat") ):
-                continue
-                
+            
             spikes_signal = spikes_signals[:, ch_ind]
             spikes_signal = 2*( spikes_signal - spikes_signal.min() ) / (spikes_signal.max() - spikes_signal.min() ) - 1
-
+            
+            if ( os.path.isfile(resultFile + ".mat") ):
+                continue
 
             pathForSignal = pathSignals + dataFile + "_channel_" + str(ch_ind+1) + "/"
 
-
-            
+           
             if not ( os.path.isdir(pathForSignal) ):
                 os.mkdir(pathForSignal)
 
@@ -468,9 +511,28 @@ if __name__ == "__main__":
             datasets_matfile = spikes_forms + dataFile + "_datasets_" + str(ch_ind+1) + ".mat"
             
             spikes_signal = lib.butter_bandpass_filter(spikes_signal, 500, fd/2-100,fd)
+            
+            
+            n_clusters_file = main_path + 'old_processing_stimulations/discriminated_spikes/' + dataFile + '_discr_channel_'  + str(ch_ind+1) + '.mat'
+            if os.path.isfile(n_clusters_file):
+                descrim = io.loadmat(n_clusters_file)
+                
+                if ("2" in descrim.keys()):
+                    n_clusters = 2
+                else:
+                    n_clusters = 1
+    
+            else:
+                n_clusters = 0
+            descrim = {}
+
+
+            
+            
+            
             spikes = autodescriminate(spikes_signal, fd, stimulations, weightsFile, \
                                         dataFile, spikeFormsFiles, pca_plot, datasets_matfile, 5, 2, saveWeights, \
-                                      loadWeights, pathForSignal, resamplingFactor)
+                                      loadWeights, pathForSignal, resamplingFactor, 0.003, n_clusters)
 
             if(type(spikes) is bool):
                 continue
@@ -478,12 +540,7 @@ if __name__ == "__main__":
 
             io.savemat(resultFile, spikes)
             del(spikes)
-        resultFile = stimulationDir + dataFile  + '_discr_stimulations'
-        if (stimulations):
-            io.savemat(resultFile, stimulations)
-        #break
-    #break
-
-
-
-
+            resultFile = stimulationDir + dataFile  + '_discr_stimulations'
+            if (stimulations):
+                io.savemat(resultFile, stimulations)
+    

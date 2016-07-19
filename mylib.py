@@ -4,6 +4,7 @@ import numpy as np
 from scipy import stats
 from sklearn.cluster import KMeans
 from sklearn.covariance import EllipticEnvelope
+from sklearn import svm
 class XMeans:
     """
     x-means法を行うクラス
@@ -91,7 +92,7 @@ class XMeans:
             ll = 0
 
             for x in self.data:
-                ll += stats.multivariate_normal.logpdf(x, self.center, self.cov)
+                ll += stats.multivariate_normal.logpdf(x, self.center, self.cov, allow_singular=True)
             
 
             return ll
@@ -100,14 +101,23 @@ class XMeans:
             bic_param = -2 * self.log_likelihood() + self.df * np.log(self.size)
             return bic_param
 ###############################################################################
-def clear_outliers (X, outliers_fraction = 0.05, contamination=0.05):
+def clear_outliers (X, outliers_fraction = 0.005, contamination=0.1):
+     # !!!!!!!!!!!!!!!!!!!!!!!!
+#    clf = EllipticEnvelope(contamination=contamination, assume_centered=True)
+#    clf.fit(X)
+#    y_pred = clf.decision_function(X).ravel()
+#    threshold = stats.scoreatpercentile(y_pred, 100 * outliers_fraction)
+#    y_pred = y_pred > threshold
+#    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    if (X.size > 20):
+        y_pred = np.ones_like(X, dtype = bool)
+    else:
+        y_pred = np.zeros_like(X, dtype = bool)
     
-    clf = EllipticEnvelope(contamination=contamination)
-    clf.fit(X)
-    y_pred = clf.decision_function(X).ravel()
-    threshold = stats.scoreatpercentile(y_pred, 100 * outliers_fraction)
-    y_pred = y_pred > threshold
+    
     return y_pred
+
+    
 
 ## librarary for filtering    
 from scipy.signal import butter, filtfilt

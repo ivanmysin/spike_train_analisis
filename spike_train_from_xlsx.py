@@ -6,7 +6,7 @@ import numpy as np
 import spike_train_lib as stl
 import matplotlib.pyplot as plt
 ###########################################################
-def save_as_xlsx(whole_stat_arr):
+def save_as_xlsx(whole_stat_arr, xlsx_file):
     n_rows = len(whole_stat_arr)
     labels = []
     for idx, row in enumerate(whole_stat_arr):
@@ -52,7 +52,10 @@ def save_as_xlsx(whole_stat_arr):
             else:
                 value = "-"
             final_array[-1].append(value)
-    return final_array
+            
+    whole_stat = pyexcel.Sheet(final_array)
+    whole_stat.save_as(xlsx_file)
+    return True
 
 ###########################################################
 # processing config
@@ -176,8 +179,4 @@ for file_name in sorted(os.listdir(events_path)):
     stat_xlsx = pyexcel.get_sheet(adict=stat_dict)
     stat_xlsx.save_as(saving_path + "stat.xlsx")
     
-    
-# нужно преобразовать whole_stat_xlsx в двумерный массив
-final_array = save_as_xlsx(whole_stat_arr)
-whole_stat = pyexcel.Sheet(final_array)
-whole_stat.save_as(statistics_path + "whole_stat.xlsx")
+save_as_xlsx(whole_stat_arr, statistics_path + "whole_stat.xlsx")

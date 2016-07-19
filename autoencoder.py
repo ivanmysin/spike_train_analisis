@@ -75,7 +75,7 @@ def compress_data_by_conv_autoencoder(X, target_dim, hidden_dim, weightsFile=Non
     hidden_dense_layer1 = Dense(hidden_dim)
     hidden_dense_layer2 = Dense(hidden_dim)
     
-    conv_layer1 = Convolution2D(nb_filters, nb_conv, 1, 
+    conv_layer1 = Convolution2D(nb_filters, nb_conv, nb_conv, 
                        border_mode='same', 
                        input_shape=(1, input_dim, 1))
     mp_layer1 = MaxPooling2D(pool_size=(nb_pool, 1))
@@ -141,13 +141,13 @@ def compress_data_by_conv_autoencoder(X, target_dim, hidden_dim, weightsFile=Non
     
    
     # training the autoencoder:
-    model.compile(optimizer='sgd', loss='mse')
+    model.compile(optimizer='adam', loss='mse')
     
     if ( type(weightsFile) is str and os.path.isfile(weightsFile) ):
         model.load_weights(weightsFile)
-    
-    model.fit(X, X, nb_epoch=50, batch_size=5) # 
-        
+    # !!!!!!!!!!!!!!!!!!
+    model.fit(X, X, nb_epoch=150, batch_size=100) # 
+    # !!!!!!!!!!!!!!!!!!
     # predicting compressed representations of inputs:
     autoencoder.output_reconstruction = False  # the model has to be recompiled after modifying this property
     model.compile(optimizer='sgd', loss='mse')

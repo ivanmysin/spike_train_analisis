@@ -53,12 +53,12 @@ def get_markers_from_file(pathfile):
     markers_file = open(pathfile, "r")
     file_contetnt = markers_file.read()
     markers_file.close()
-    markers = {}
+    markers = []
     for idx, line in enumerate( file_contetnt.split("\n")[1:] ):
         if (line == "" or line == "\n"):
             continue
         item, key = line.split("\t")
-        markers[key] = float(item)
+        markers.append( {"time": float(item), 'lable': key} )
     return markers
 
 ######################################################################
@@ -73,11 +73,13 @@ def get_rate_plot(spikes, step):
 #######################################################################
 main_path = "/home/ivan/Data/Ach_full/"
 marker_path = main_path + "markers/"
-discrim_spikes_path = main_path + "processing/discriminated_spikes_merged/"
+discrim_spikes_path = main_path + "final_disrimination/discriminated_spikes/"
 bounds_path = main_path + "bounds/"
 
 counter = 1
 for matfile in sorted(os.listdir(discrim_spikes_path)):
+    if (matfile[0] == "."):
+        continue
     print (matfile)
 
     markers_file = matfile.split("int")[0] + ".txt"
@@ -90,6 +92,11 @@ for matfile in sorted(os.listdir(discrim_spikes_path)):
         if type(spike_train) is np.ndarray:
             spike_train = spike_train.reshape(spike_train.size)
             times, spikes_rate = get_rate_plot(spike_train, 10)
+
+            if (np.mean(spikes_rate) > 0.5):
+                continue
+            
+            counter += 1
             fig = plt.figure()
             ax = fig.add_subplot(111)
             ax.step(times, spikes_rate)
@@ -97,8 +104,9 @@ for matfile in sorted(os.listdir(discrim_spikes_path)):
             ax.set_ylabel("rate, sp/sec")
             ax.set_ylim(0, 2.5*spikes_rate.max())
             
-            for idx, lable in enumerate( sorted(markers, key=markers.get ) ):
-                time = markers[lable]
+            for idx, mark in enumerate(markers):
+                time = mark["time"]
+                lable = mark["lable"]
                 if (idx%2 != 0):
                     y_text = spikes_rate.max() * ( np.random.rand() + 1)
                 else:
@@ -126,10 +134,9 @@ for matfile in sorted(os.listdir(discrim_spikes_path)):
             
             save_button = Button(save, 'Save')
             save_button.on_clicked(callback.save)
-            plt.show(block=False)
-            plt.close()
-            if (np.mean(spikes_rate) > 0.8):
-                counter += 1
+            plt.show(block=True)
+            #plt.close()
+            
             
     
     #break
